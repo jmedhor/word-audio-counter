@@ -34,7 +34,7 @@ def save_db():
 # MODEL
 # -----------------------
 model = WhisperModel(
-    "small",   # mejor precisión
+    "small",
     device="cpu",
     compute_type="int8"
 )
@@ -44,8 +44,22 @@ duracion = 4
 solape = 1
 
 running = False
-
 buffer = np.array([], dtype=np.float32)
+
+# -----------------------
+# AUDIO LOG
+# -----------------------
+log_lines = []
+
+def add_log(text):
+    log_lines.append(text)
+    if len(log_lines) > 50:
+        log_lines.pop(0)
+
+    log_box.configure(state="normal")
+    log_box.delete("0.0", "end")
+    log_box.insert("0.0", "\n".join(log_lines))
+    log_box.configure(state="disabled")
 
 # -----------------------
 # AUDIO LOOP
@@ -71,15 +85,17 @@ def escuchar():
 
         status_label.configure(text="🎧 Escuchando...")
 
+        add_log(f"🗣 {texto}")
+
         for frase in list(data.keys()):
 
-            # fuzzy match para palabras mal reconocidas
             score = fuzz.partial_ratio(frase, texto)
 
             if frase in texto or score > 85:
                 data[frase] += 1
                 save_db()
                 refresh_list()
+                add_log(f"🔥 MATCH: '{frase}' → {data[frase]}")
 
 # -----------------------
 # UI LOGIC
@@ -102,55 +118,68 @@ def add_phrase():
         save_db()
         refresh_list()
 
-def remove_phrase():
-    frase = entry.get().strip().lower()
-    if frase in data:
-        del data[frase]
+def remove_phrase(phrase):
+    if phrase in data:
+        del data[phrase]
         save_db()
         refresh_list()
 
-def select_phrase(event):
-    selection = listbox.get(listbox.curselection())
-    frase = selection.split(" → ")[0]
-    entry.delete(0, "end")
-    entry.insert(0, frase)
-
+# -----------------------
+# UI RENDER LIST (CON BOTÓN DELETE)
+# -----------------------
 def refresh_list():
-    listbox.delete(0, "end")
+
+    for widget in list_frame.winfo_children():
+        widget.destroy()
+
     for k, v in data.items():
-        listbox.insert("end", f"{k} → {v}")
+
+        row = ctk.CTkFrame(list_frame)
+        row.pack(fill="x", pady=2)
+
+        label = ctk.CTkLabel(row, text=f"{k} → {v}", anchor="w")
+        label.pack(side="left", padx=10)
+
+        btn = ctk.CTkButton(
+            row,
+            text="🗑",
+            width=40,
+            command=lambda k=k: remove_phrase(k)
+        )
+        btn.pack(side="right", padx=5)
 
 # -----------------------
 # UI
 # -----------------------
 root = ctk.CTk()
-root.title("🎤 Speech Detector PRO")
-root.geometry("520x600")
+root.title("Speech Detector")
+root.geometry("650x750")
 
 entry = ctk.CTkEntry(root, width=400, placeholder_text="Escribe frase...")
 entry.pack(pady=10)
 
-btn_frame = ctk.CTkFrame(root)
-btn_frame.pack()
-
-ctk.CTkButton(btn_frame, text="➕ Añadir", command=add_phrase).grid(row=0, column=0, padx=5)
-ctk.CTkButton(btn_frame, text="➖ Quitar", command=remove_phrase).grid(row=0, column=1, padx=5)
+ctk.CTkButton(root, text="➕ Añadir frase", command=add_phrase).pack()
 
 ctk.CTkButton(root, text="▶ START", command=start).pack(pady=5)
-ctk.CTkButton(root, text="⏹ STOP", command=stop).pack(pady=5)
+ctk.CTkButton(root, text="⏹ STOP", command=stop).pack()
 
 status_label = ctk.CTkLabel(root, text="🔴 PARADO")
 status_label.pack(pady=10)
 
-listbox = ctk.CTkTextbox(root, width=450, height=300)
-listbox.pack(pady=10)
+# -----------------------
+# LISTA FRAME
+# -----------------------
+list_frame = ctk.CTkScrollableFrame(root, width=600, height=250)
+list_frame.pack(pady=10)
 
-def refresh_list():
-    listbox.delete("0.0", "end")
-    for k, v in data.items():
-        listbox.insert("end", f"{k} → {v}\n")
+# -----------------------
+# LOG FRAME
+# -----------------------
+ctk.CTkLabel(root, text="📜 LOG").pack()
 
-listbox.bind("<Button-1>", select_phrase)
+log_box = ctk.CTkTextbox(root, width=600, height=200)
+log_box.pack()
+log_box.configure(state="disabled")
 
 refresh_list()
 
