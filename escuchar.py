@@ -1,13 +1,20 @@
+import customtkinter as ctk
 import sounddevice as sd
 import numpy as np
 import threading
 import json
 import os
 import sys
-import tkinter as tk
+from rapidfuzz import fuzz
 from faster_whisper import WhisperModel
 
 sys.stdout.reconfigure(encoding='utf-8')
+
+# -----------------------
+# UI CONFIG
+# -----------------------
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
 
 # -----------------------
 # STORAGE
@@ -24,10 +31,10 @@ def save_db():
         json.dump(data, f, ensure_ascii=False, indent=4)
 
 # -----------------------
-# WHISPER MODEL
+# MODEL
 # -----------------------
 model = WhisperModel(
-    "base",
+    "small",   # mejor precisión
     device="cpu",
     compute_type="int8"
 )
@@ -36,111 +43,114 @@ fs = 16000
 duracion = 4
 solape = 1
 
-# -----------------------
-# STATE
-# -----------------------
 running = False
-current_phrase = ""
-current_count = 0
-guardar = False
 
-buffer_total = np.array([], dtype=np.float32)
+buffer = np.array([], dtype=np.float32)
 
 # -----------------------
-# AUDIO ENGINE
+# AUDIO LOOP
 # -----------------------
 def escuchar():
-    global buffer_total, current_count, running
+    global buffer
 
     while running:
 
-        audio = sd.rec(
-            int(duracion * fs),
-            samplerate=fs,
-            channels=1,
-            dtype=np.float32
-        )
+        audio = sd.rec(int(duracion * fs),
+                       samplerate=fs,
+                       channels=1,
+                       dtype=np.float32)
 
         sd.wait()
         audio = audio.flatten()
 
-        buffer_total = np.concatenate((buffer_total[-solape*fs:], audio))
+        buffer = np.concatenate((buffer[-solape*fs:], audio))
 
-        segments, _ = model.transcribe(buffer_total)
+        segments, _ = model.transcribe(buffer)
 
         texto = " ".join(s.text.lower() for s in segments)
 
-        print("Detectado:", texto)
+        status_label.configure(text="🎧 Escuchando...")
 
-        if current_phrase and current_phrase.lower() in texto:
-            current_count += texto.count(current_phrase.lower())
+        for frase in list(data.keys()):
 
-            if guardar:
-                data[current_phrase] = current_count
+            # fuzzy match para palabras mal reconocidas
+            score = fuzz.partial_ratio(frase, texto)
+
+            if frase in texto or score > 85:
+                data[frase] += 1
                 save_db()
-
-            actualizar_ui()
+                refresh_list()
 
 # -----------------------
-# UI ACTIONS
+# UI LOGIC
 # -----------------------
 def start():
-    global running, current_phrase, current_count, guardar
-
-    current_phrase = entry.get().strip().lower()
-
-    if not current_phrase:
-        return
-
-    guardar = var_guardar.get()
-
-    if current_phrase in data:
-        current_count = data[current_phrase]
-    else:
-        current_count = 0
-
+    global running
     running = True
-
     threading.Thread(target=escuchar, daemon=True).start()
+    status_label.configure(text="🟢 ACTIVO")
 
 def stop():
     global running
     running = False
+    status_label.configure(text="🔴 PARADO")
 
-def actualizar_ui():
-    label_count.config(text=f"Contador: {current_count}")
-    refresh_list()
+def add_phrase():
+    frase = entry.get().strip().lower()
+    if frase and frase not in data:
+        data[frase] = 0
+        save_db()
+        refresh_list()
+
+def remove_phrase():
+    frase = entry.get().strip().lower()
+    if frase in data:
+        del data[frase]
+        save_db()
+        refresh_list()
+
+def select_phrase(event):
+    selection = listbox.get(listbox.curselection())
+    frase = selection.split(" → ")[0]
+    entry.delete(0, "end")
+    entry.insert(0, frase)
 
 def refresh_list():
-    listbox.delete(0, tk.END)
+    listbox.delete(0, "end")
     for k, v in data.items():
-        listbox.insert(tk.END, f"{k} → {v}")
+        listbox.insert("end", f"{k} → {v}")
 
 # -----------------------
 # UI
 # -----------------------
-root = tk.Tk()
-root.title("Detector de Frases PRO")
-root.geometry("420x500")
+root = ctk.CTk()
+root.title("🎤 Speech Detector PRO")
+root.geometry("520x600")
 
-tk.Label(root, text="🎤 Frase a detectar").pack()
+entry = ctk.CTkEntry(root, width=400, placeholder_text="Escribe frase...")
+entry.pack(pady=10)
 
-entry = tk.Entry(root, width=40)
-entry.pack(pady=5)
+btn_frame = ctk.CTkFrame(root)
+btn_frame.pack()
 
-var_guardar = tk.BooleanVar()
-tk.Checkbutton(root, text="Guardar historial", variable=var_guardar).pack()
+ctk.CTkButton(btn_frame, text="➕ Añadir", command=add_phrase).grid(row=0, column=0, padx=5)
+ctk.CTkButton(btn_frame, text="➖ Quitar", command=remove_phrase).grid(row=0, column=1, padx=5)
 
-tk.Button(root, text="START", command=start).pack(pady=5)
-tk.Button(root, text="STOP", command=stop).pack()
+ctk.CTkButton(root, text="▶ START", command=start).pack(pady=5)
+ctk.CTkButton(root, text="⏹ STOP", command=stop).pack(pady=5)
 
-label_count = tk.Label(root, text="Contador: 0", font=("Arial", 18))
-label_count.pack(pady=10)
+status_label = ctk.CTkLabel(root, text="🔴 PARADO")
+status_label.pack(pady=10)
 
-tk.Label(root, text="Frases guardadas").pack()
-
-listbox = tk.Listbox(root, width=50)
+listbox = ctk.CTkTextbox(root, width=450, height=300)
 listbox.pack(pady=10)
+
+def refresh_list():
+    listbox.delete("0.0", "end")
+    for k, v in data.items():
+        listbox.insert("end", f"{k} → {v}\n")
+
+listbox.bind("<Button-1>", select_phrase)
 
 refresh_list()
 
