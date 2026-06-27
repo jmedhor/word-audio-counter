@@ -1,4 +1,4 @@
-# 🎤 Speech Detector PRO
+# 🎤 Word-Audio-Counter (a.k.a Simple Speech Detector)
 
 A desktop Python application that detects specific spoken phrases in real time using microphone input, maintaining a counter for each detected phrase and storing historical data.
 
